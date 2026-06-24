@@ -207,11 +207,15 @@ th .delcol:hover{color:var(--neg)}
 .mname{width:100%;background:var(--bg);border:1px solid var(--line-strong);border-radius:8px;
   color:var(--text);font-family:'Archivo';font-size:15px;padding:9px 11px}
 .formula{min-height:42px;background:var(--bg);border:1px solid var(--line);border-radius:8px;
-  padding:8px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
-.formula .fhint{color:var(--faint);font-size:12.5px;font-family:'Archivo Narrow'}
+  padding:8px 6px;display:flex;flex-wrap:wrap;gap:2px;align-items:center;cursor:text}
+.formula .fhint{color:var(--faint);font-size:12.5px;font-family:'Archivo Narrow';padding:0 4px}
 .formula .chip{background:var(--surface2);border:1px solid var(--line-strong);border-radius:6px;
-  padding:4px 8px;font-family:'Spline Sans Mono';font-size:12.5px;color:var(--text)}
+  padding:4px 8px;font-family:'Spline Sans Mono';font-size:12.5px;color:var(--text);cursor:pointer}
 .formula .chip.opc{color:var(--gold)}
+.formula .fslot{align-self:stretch;min-width:5px;display:inline-flex;align-items:center;justify-content:center}
+.formula .fslot:first-child{min-width:7px}
+.fcaret{width:2px;height:19px;background:var(--gold);border-radius:1px;animation:cgblink 1.05s step-end infinite}
+@keyframes cgblink{50%{opacity:0}}
 .mtools{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;align-items:center}
 .mtools .op{appearance:none;cursor:pointer;background:var(--surface2);border:1px solid var(--line-strong);
   color:var(--text);border-radius:7px;font-family:'Spline Sans Mono';font-size:14px;min-width:34px;padding:7px 9px}
@@ -228,6 +232,10 @@ th .delcol:hover{color:var(--neg)}
 .mfoot .cancel{background:transparent;border:1px solid var(--line-strong);color:var(--muted)}
 .mfoot .save{background:var(--gold);border:0;color:#1a1205}
 .mfoot .save:disabled{opacity:.4;cursor:not-allowed}
+.mfoot .del{background:transparent;border:1px solid var(--neg);color:var(--neg);margin-right:auto}
+.mfoot .del:hover{background:rgba(224,115,107,.12)}
+th.custcol{cursor:pointer;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+th.custcol .ar{margin-right:2px}
 .scrollhint{color:var(--faint);font-size:11px;margin:8px 2px 0;font-family:'Archivo Narrow'}
 @media(max-width:760px){
   .wrap{padding:calc(16px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) 48px calc(12px + env(safe-area-inset-left))}
@@ -352,7 +360,7 @@ th .delcol:hover{color:var(--neg)}
 
 <div class="modal" id="statModal">
   <div class="sheet">
-    <div class="mhead"><b>New custom stat</b><button class="x" id="mClose">&times;</button></div>
+    <div class="mhead"><b id="mTitle">New custom stat</b><button class="x" id="mClose">&times;</button></div>
     <label class="mlab">Name</label>
     <input id="mName" class="mname" placeholder="e.g. Power Index" maxlength="18">
     <label class="mlab">Formula</label>
@@ -367,6 +375,7 @@ th .delcol:hover{color:var(--neg)}
     <label class="mlab">Metrics</label>
     <div class="metrics" id="mMetrics"></div>
     <div class="mfoot">
+      <button class="del" id="mDelete" style="display:none">Delete</button>
       <button class="cancel" id="mCancel">Cancel</button>
       <button class="save" id="mSave">Add column</button>
     </div>
@@ -546,13 +555,15 @@ function render(){
   const hdr=state.mode==='pitch'?'Pitcher':'Batter';
   const thead=document.querySelector('#tbl thead');
   thead.innerHTML='<tr><th class="player" data-k="_name">'+hdr+'</th>'+
-    cols.map(cd=>{const key=cd[1];const del=(cd[4]&&!cd[4].fixed)?`<span class="delcol" data-del="${cd[4].id}" title="Remove column">&times;</span>`:'';
-      return `<th data-k="${key}" class="${key===sk?'sorted':''}">${cd[0]}<span class="ar">${state.dir<0?'▼':'▲'}</span>${del}</th>`;}).join('')+'</tr>';
-  thead.querySelectorAll('th').forEach(th=>th.onclick=(e)=>{
-    if(e.target.classList.contains('delcol')){removeCustom(e.target.dataset.del);return;}
-    const k=th.dataset.k; if(k==='_name')return;
-    if(state.sort[state.tab]===k)state.dir*=-1;else{state.sort[state.tab]=k;state.dir=-1;}
-    render();});
+    cols.map(cd=>{const key=cd[1];const isc=!!cd[4];
+      return `<th data-k="${key}"${isc?` data-cid="${cd[4].id}"`:''} class="${key===sk?'sorted':''}${isc?' custcol':''}"${isc?' title="Long-press to edit"':''}>${cd[0]}<span class="ar">${state.dir<0?'▼':'▲'}</span></th>`;}).join('')+'</tr>';
+  thead.querySelectorAll('th').forEach(th=>{
+    const k=th.dataset.k;
+    th.onclick=()=>{ if(th._lp){th._lp=false;return;} if(k==='_name')return;
+      if(state.sort[state.tab]===k)state.dir*=-1;else{state.sort[state.tab]=k;state.dir=-1;}
+      render();};
+    if(th.dataset.cid) attachLongPress(th,()=>openStatModal(th.dataset.cid));
+  });
   const tb=document.querySelector('#tbl tbody');
   if(state.tab==='hype' && cols.length===0){
     tb.innerHTML=`<tr><td class="hypeempty" colspan="2">No custom stats yet. Tap “+ Add custom stat”.</td></tr>`;return;}
@@ -847,44 +858,78 @@ document.getElementById('noteBtn').onclick=()=>{
   btn.classList.toggle('open', n.classList.toggle('open'));
 };
 
-/* ---------- custom-stat builder modal ---------- */
-let mTokens=[];
+/* ---------- custom-stat builder / editor modal ---------- */
+let mTokens=[], mCursor=0, editingId=null;
 const OPDISP={'*':'×','/':'÷'};
 function renderFormula(){
   const box=document.getElementById('mFormula');
   if(!mTokens.length){box.innerHTML='<span class="fhint">Tap metrics and operators below…</span>';}
-  else box.innerHTML=mTokens.map(t=>{
-    const op='+-*/()'.includes(t)&&t.length===1||t===')'||t==='(';
-    const disp=OPDISP[t]||t;
-    return `<span class="chip ${op?'opc':''}">${disp}</span>`;}).join('');
+  else{
+    const caret='<span class="fcaret"></span>';
+    let html=`<span class="fslot" data-c="0">${mCursor===0?caret:''}</span>`;
+    mTokens.forEach((t,i)=>{
+      const op='+-*/()'.includes(t)&&t.length===1;
+      html+=`<span class="chip ${op?'opc':''}" data-i="${i}">${OPDISP[t]||t}</span>`;
+      html+=`<span class="fslot" data-c="${i+1}">${mCursor===i+1?caret:''}</span>`;
+    });
+    box.innerHTML=html;
+    box.querySelectorAll('.chip').forEach(c=>c.onclick=e=>{e.stopPropagation();mCursor=+c.dataset.i+1;renderFormula();});
+    box.querySelectorAll('.fslot').forEach(s=>s.onclick=e=>{e.stopPropagation();mCursor=+s.dataset.c;renderFormula();});
+  }
   document.getElementById('mSave').disabled=!(mTokens.length && document.getElementById('mName').value.trim());
 }
-function openStatModal(){
-  mTokens=[];document.getElementById('mName').value='';
+function addTok(t){mTokens.splice(mCursor,0,t);mCursor++;renderFormula();}
+function openStatModal(id){
+  editingId=id||null;
   const mm=document.getElementById('mMetrics');
   mm.innerHTML=METRICS[state.mode].map(([lab,key])=>`<button class="m" data-k="${key}">${lab}</button>`).join('');
-  mm.querySelectorAll('.m').forEach(btn=>btn.onclick=()=>{mTokens.push(btn.dataset.k);renderFormula();});
+  mm.querySelectorAll('.m').forEach(btn=>btn.onclick=()=>addTok(btn.dataset.k));
+  const col=editingId?(state.customCols[state.mode]||[]).find(c=>c.id===editingId):null;
+  mTokens=col?col.tokens.slice():[];
+  document.getElementById('mName').value=col?col.name:'';
+  mCursor=mTokens.length;
+  document.getElementById('mTitle').textContent=col?'Edit stat':'New custom stat';
+  document.getElementById('mSave').textContent=col?'Save':'Add column';
+  document.getElementById('mDelete').style.display=(col&&!col.fixed)?'':'none';
   renderFormula();
   document.getElementById('statModal').classList.add('open');
 }
 function closeStatModal(){document.getElementById('statModal').classList.remove('open');}
-document.getElementById('addStatBtn').onclick=openStatModal;
+function attachLongPress(el,fn){
+  let timer=null,sx=0,sy=0;
+  const cancel=()=>{if(timer){clearTimeout(timer);timer=null;}};
+  el.addEventListener('pointerdown',e=>{sx=e.clientX;sy=e.clientY;cancel();
+    timer=setTimeout(()=>{el._lp=true;fn();},500);});
+  el.addEventListener('pointerup',cancel);
+  el.addEventListener('pointerleave',cancel);
+  el.addEventListener('pointercancel',cancel);
+  el.addEventListener('pointermove',e=>{if(Math.abs(e.clientX-sx)>8||Math.abs(e.clientY-sy)>8)cancel();});
+  el.addEventListener('contextmenu',e=>e.preventDefault());
+}
+document.getElementById('addStatBtn').onclick=()=>openStatModal();
 document.getElementById('mClose').onclick=closeStatModal;
 document.getElementById('mCancel').onclick=closeStatModal;
 document.getElementById('statModal').onclick=(e)=>{if(e.target.id==='statModal')closeStatModal();};
-document.querySelectorAll('#statModal .op[data-t]').forEach(b=>b.onclick=()=>{mTokens.push(b.dataset.t);renderFormula();});
-document.getElementById('mBack').onclick=()=>{mTokens.pop();renderFormula();};
+document.querySelectorAll('#statModal .op[data-t]').forEach(b=>b.onclick=()=>addTok(b.dataset.t));
+document.getElementById('mBack').onclick=()=>{if(mCursor>0){mTokens.splice(mCursor-1,1);mCursor--;renderFormula();}};
 document.getElementById('mAddNum').onclick=()=>{const v=document.getElementById('mNum').value.trim();
-  if(v!==''&&!isNaN(parseFloat(v))){mTokens.push(String(parseFloat(v)));document.getElementById('mNum').value='';renderFormula();}};
+  if(v!==''&&!isNaN(parseFloat(v))){addTok(String(parseFloat(v)));document.getElementById('mNum').value='';}};
 document.getElementById('mName').oninput=renderFormula;
+document.getElementById('mDelete').onclick=()=>{if(editingId)removeCustom(editingId);closeStatModal();};
 document.getElementById('mSave').onclick=()=>{
   const name=document.getElementById('mName').value.trim();
   if(!name||!mTokens.length)return;
-  const id='c'+Date.now().toString(36);
-  state.customCols[state.mode].push({id,name,tokens:mTokens.slice()});
-  saveCustom();closeStatModal();
-  state.tab='hype';document.querySelectorAll('#tabs .tab').forEach(x=>x.classList.toggle('on',x.dataset.t==='hype'));
-  state.sort.hype='__c_'+id;render();
+  if(editingId){
+    const col=(state.customCols[state.mode]||[]).find(c=>c.id===editingId);
+    if(col){col.name=name;col.tokens=mTokens.slice();}
+    saveCustom();closeStatModal();render();
+  }else{
+    const id='c'+Date.now().toString(36);
+    state.customCols[state.mode].push({id,name,tokens:mTokens.slice()});
+    saveCustom();closeStatModal();
+    state.tab='hype';document.querySelectorAll('#tabs .tab').forEach(x=>x.classList.toggle('on',x.dataset.t==='hype'));
+    state.sort.hype='__c_'+id;render();
+  }
 };
 
 loadCustom();
