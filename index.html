@@ -227,6 +227,9 @@ th .delcol:hover{color:var(--neg)}
 .metrics .m{appearance:none;cursor:pointer;background:var(--bg);border:1px solid var(--line);
   color:var(--muted);border-radius:6px;font-family:'Archivo Narrow';font-weight:600;font-size:12px;padding:6px 9px}
 .metrics .m:hover{border-color:var(--gold);color:var(--text)}
+.metrics .mgroup{flex-basis:100%;color:var(--faint);font-size:9px;text-transform:uppercase;letter-spacing:1.2px;margin:8px 2px 1px}
+.metrics .mc{border-color:rgba(245,198,74,.45);color:var(--gold)}
+.formula .chip.cc{color:var(--gold);border-color:rgba(245,198,74,.45)}
 .mfoot{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}
 .mfoot button{appearance:none;cursor:pointer;border-radius:8px;font-family:'Archivo Narrow';font-weight:700;font-size:13px;padding:9px 16px}
 .mfoot .cancel{background:transparent;border:1px solid var(--line-strong);color:var(--muted)}
@@ -537,7 +540,9 @@ function render(){
   const KS=curKeys();
   const agg=aggregate();
   let rows=Object.values(agg).filter(rowOk).map(finalize);
-  if(state.tab==='hype') rows.forEach(r=>cols.forEach(cd=>{r[cd[1]]=evalFormula(cd[4].tokens,r);}));
+  // compute custom columns; multiple passes let one custom stat reference another
+  const computeHype=(r)=>{for(let pass=0;pass<cols.length;pass++)cols.forEach(cd=>{r[cd[1]]=evalFormula(cd[4].tokens,r);});};
+  if(state.tab==='hype') rows.forEach(computeHype);
   let sk=state.sort[state.tab]; if(!cols.some(c=>c[1]===sk)) sk=cols[1]?cols[1][1]:(cols[0]?cols[0][1]:'_name');
   rows.sort((a,b)=>{const x=a[sk],y=b[sk];
     if(x===null||isNaN(x))return 1;if(y===null||isNaN(y))return -1;
@@ -545,7 +550,7 @@ function render(){
   const team={};KS.forEach(k=>team[k]=0);
   rows.forEach(r=>KS.forEach(k=>team[k]+=(r[k]||0)));
   const teamF=finalize(team);
-  if(state.tab==='hype') cols.forEach(cd=>{teamF[cd[1]]=evalFormula(cd[4].tokens,teamF);});
+  if(state.tab==='hype') computeHype(teamF);
   const showTeam=(state.mode==='pitch')||(state.side==='rt');
   const minN=state.mode==='pitch'?20:10, nf=state.mode==='pitch'?'BF':'PA';
   const leaders={};
@@ -861,6 +866,11 @@ document.getElementById('noteBtn').onclick=()=>{
 /* ---------- custom-stat builder / editor modal ---------- */
 let mTokens=[], mCursor=0, editingId=null;
 const OPDISP={'*':'×','/':'÷'};
+function tokDisp(t){
+  if(OPDISP[t]) return OPDISP[t];
+  if(t&&t.indexOf('__c_')===0){const c=(state.customCols[state.mode]||[]).find(x=>'__c_'+x.id===t);return c?c.name:t;}
+  return t;
+}
 function renderFormula(){
   const box=document.getElementById('mFormula');
   if(!mTokens.length){box.innerHTML='<span class="fhint">Tap metrics and operators below…</span>';}
@@ -869,7 +879,8 @@ function renderFormula(){
     let html=`<span class="fslot" data-c="0">${mCursor===0?caret:''}</span>`;
     mTokens.forEach((t,i)=>{
       const op='+-*/()'.includes(t)&&t.length===1;
-      html+=`<span class="chip ${op?'opc':''}" data-i="${i}">${OPDISP[t]||t}</span>`;
+      const cc=t&&t.indexOf('__c_')===0;
+      html+=`<span class="chip ${op?'opc':''}${cc?' cc':''}" data-i="${i}">${tokDisp(t)}</span>`;
       html+=`<span class="fslot" data-c="${i+1}">${mCursor===i+1?caret:''}</span>`;
     });
     box.innerHTML=html;
@@ -882,7 +893,11 @@ function addTok(t){mTokens.splice(mCursor,0,t);mCursor++;renderFormula();}
 function openStatModal(id){
   editingId=id||null;
   const mm=document.getElementById('mMetrics');
-  mm.innerHTML=METRICS[state.mode].map(([lab,key])=>`<button class="m" data-k="${key}">${lab}</button>`).join('');
+  let mh=METRICS[state.mode].map(([lab,key])=>`<button class="m" data-k="${key}">${lab}</button>`).join('');
+  const customs=(state.customCols[state.mode]||[]).filter(c=>c.id!==editingId);
+  if(customs.length) mh+=`<span class="mgroup">Your stats</span>`+
+    customs.map(c=>`<button class="m mc" data-k="__c_${c.id}">${c.name}</button>`).join('');
+  mm.innerHTML=mh;
   mm.querySelectorAll('.m').forEach(btn=>btn.onclick=()=>addTok(btn.dataset.k));
   const col=editingId?(state.customCols[state.mode]||[]).find(c=>c.id===editingId):null;
   mTokens=col?col.tokens.slice():[];
