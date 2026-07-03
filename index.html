@@ -493,17 +493,30 @@ const METRICS={
 const HYPE_DEFAULTS={
  hit:[{id:'reach',name:'REACH',fixed:true,tokens:['(','H','+','ROE','+','FC','+','SAC','+','SF',')','/','PA']},
       {id:'rp',name:'RP%',fixed:true,tokens:['(','R','+','RBI',')','/','PA','*','100']},
-      {id:'k',name:'K%',fixed:true,tokens:['SO','/','PA','*','100']}],
+      {id:'k',name:'K%',fixed:true,tokens:['SO','/','PA','*','100']},
+      {id:'obpstar',name:'OBP*',fixed:true,tokens:['(','H','+','ROE','+','FC','+','BB','+','SAC','+','SF','+','HBP',')','/','PA']},
+      {id:'slgstar',name:'SLG*',fixed:true,tokens:['(','TB','+','ROE','+','FC',')','/','AB']},
+      {id:'opsstar',name:'OPS*',fixed:true,tokens:['__c_obpstar','+','__c_slgstar']}],
  pitch:[]
 };
-const FIXED_IDS=new Set(['reach','rp','k']);
+const FIXED_IDS=new Set(['reach','rp','k','obpstar','slgstar','opsstar']);
+function mergeDefaults(mode){
+  const loaded=state.customCols[mode]||[], byId={};
+  loaded.forEach(c=>byId[c.id]=c);
+  const out=[];
+  HYPE_DEFAULTS[mode].forEach(d=>{out.push(byId[d.id]||JSON.parse(JSON.stringify(d)));delete byId[d.id];});
+  loaded.forEach(c=>{if(byId[c.id])out.push(c);});   // keep user-added columns
+  return out;
+}
 function loadCustom(){
   try{const s=JSON.parse(localStorage.getItem('cg_custom'));
-    if(s&&s.hit&&s.pitch){state.customCols=s;
-      // keep built-ins non-removable even if saved before this flag existed
-      ['hit','pitch'].forEach(m=>(s[m]||[]).forEach(c=>{if(FIXED_IDS.has(c.id))c.fixed=true;}));
-      return;}}catch(e){}
-  state.customCols=JSON.parse(JSON.stringify(HYPE_DEFAULTS));
+    state.customCols=(s&&s.hit&&s.pitch)?s:JSON.parse(JSON.stringify(HYPE_DEFAULTS));
+  }catch(e){state.customCols=JSON.parse(JSON.stringify(HYPE_DEFAULTS));}
+  // ensure built-in defaults exist (adds newly-shipped ones to existing browsers) + mark fixed
+  ['hit','pitch'].forEach(m=>{
+    state.customCols[m]=mergeDefaults(m);
+    state.customCols[m].forEach(c=>{if(FIXED_IDS.has(c.id))c.fixed=true;});
+  });
 }
 function saveCustom(){try{localStorage.setItem('cg_custom',JSON.stringify(state.customCols));}catch(e){}}
 function evalFormula(tokens,row){
